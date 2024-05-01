@@ -39,6 +39,7 @@ Works with Python 3.8.10
 # ||
 # ||
 # ||
+import subprocess
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -52,49 +53,58 @@ from numba import njit
 plt.style.use("seaborn-v0_8-pastel")
 
 # || Lorentz force acting on a state vector
-@njit
-def lorentz_force(t, y, q, E, B):
-    """
-    Function to compute the derivative of the state vector y for the Lorentz force equation.
+# @njit
+def lorentz_force(y, t, q, E, U, R, B0, r0, phi0, theta):
+    x, y, z, vx, vy, vz = y
     
-    Parameters:
-        t (float): Time.
-        y (array): State vector [x, y, z, vx, vy, vz].
-        q (float): Charge of the particle.
-        E (array): Electric field vector [Ex, Ey, Ez].
-        B (array): Magnetic field vector [Bx, By, Bz].
-        
-    Returns:
-        dydt (array): Derivative of the state vector.
-    """
-    # Unpack state vector
-    x_, y_, z_, vx_, vy_, vz_ = y
+    # Compute magnetic field components at the current location
+    B_x, B_y, B_z = interplanetary_magnetic_field(x, y, U, R, B0, r0, phi0, theta, t)
     
     # Compute Lorentz force components
-    Fx = q * (E[0] + vy_ * B[2] - vz_ * B[1])
-    Fy = q * (E[1] + vz_ * B[0] - vx_ * B[2])
-    Fz = q * (E[2] + vx_ * B[1] - vy_ * B[0])
+    Fx = q * (E[0] + vy * B_z - vz * B_y)
+    Fy = q * (E[1] + vz * B_x - vx * B_z)
+    Fz = q * (E[2] + vx * B_y - vy * B_x)
     
     # Return derivative of the state vector
-    return [vx_, vy_, vz_, Fx, Fy, Fz]
+    return [vx, vy, vz, Fx, Fy, Fz]
 
-# || Executable Code
-def integrate_lorentz_force(q, E, B, initial_conditions, t):
-    """
-    Function to integrate Newton's law for the Lorentz force equation.
+
+# || Integrator
+def integrate_lorentz_force(q, E, initial_conditions, t, U, R, B0, r0, phi0, theta):
+    y = np.zeros((len(t), 6))
+    y[0] = initial_conditions  # Set initial conditions
     
-    Parameters:
-        q (float): Charge of the particle.
-        E (array): Electric field vector [Ex, Ey, Ez].
-        B (array): Magnetic field vector [Bx, By, Bz].
-        initial_conditions (array): Initial conditions [x0, y0, z0, vx0, vy0, vz0].
-        t (array): Time array.
+    for i in range(1, len(t)):
+        # Compute magnetic field components at the current location
+        B_x, B_y, B_z = interplanetary_magnetic_field(y[i-1, 0], y[i-1, 1], U, R, B0, r0, phi0, theta, t[i])
+        print(f"B = {B_x}, {B_y}, {B_z}")
         
-    Returns:
-        y (array): State vector at each time step.
-    """
-    # Integrate using odeint
-    y = odeint(lorentz_force, initial_conditions, t, args=(q, E, B))
+        # Convert y[i-1] to a list
+        y_im1_list = y[i-1].tolist()
+        
+        # Integrate using Euler's method
+        dt = t[i] - t[i-1]
+
+        formatted_string = f"y[i] = {y[i]}\n" \
+                   f"y[i-1] = {y[i-1]}\n" \
+                   f"dt = {dt}\n" \
+                   f"t[i-1] = {t[i-1]}\n" \
+                   f"q = {q}\n" \
+                   f"E = {E}\n" \
+                   f"U = {U}\n" \
+                   f"R = {R}\n" \
+                   f"B0 = {B0}\n" \
+                   f"r0 = {r0}\n" \
+                   f"phi0 = {phi0}\n" \
+                   f"theta = {theta}\n"
+
+        # print(formatted_string)
+
+
+        y[i] = np.array(y_im1_list) + dt * np.array(lorentz_force(y_im1_list, t[i-1], q, E, U, R, B0, r0, phi0, theta))
+    
+        
+    
     return y
 
 
@@ -102,13 +112,16 @@ def integrate_lorentz_force(q, E, B, initial_conditions, t):
 # %% Function to calculate the magnetic field components
 def interplanetary_magnetic_field(x, y, U, R, B0, r0, phi0, theta, t):
     rsq = x**2 + y**2
+
     B_R = B0 * (r0 / rsq)**2 * np.cos(np.pi * t / 11 + phi0)
     B_T = B0 * (r0 / rsq) * np.cos(theta) * np.cos(np.pi * t / 11 + phi0)
 
     B_x = U * y + B_R * x / rsq - B_T * y / rsq
     B_y = -U * x + B_R * y / rsq + B_T * x / rsq
 
-    return B_x, B_y
+    return B_x, B_y, 0
+
+    
 
 
 # || IMF Display
@@ -144,7 +157,7 @@ def display_interplanetary_magnetic_field(U, R, B0, r0, phi0, theta):
     def update(frame):
         ax.clear()
         # Recalculate magnetic field at each timestep
-        B_x, B_y = interplanetary_magnetic_field(X, Y, U, R, B0, r0, phi0, theta, frame)
+        B_x, B_y = interplanetary_magnetic_field(X, Y, U, R, B0, r0, phi0, theta, frame)[0], interplanetary_magnetic_field(X, Y, U, R, B0, r0, phi0, theta, frame)[1]
         color = np.log(1+np.sqrt(B_x**2 + B_y**2))
         stream = ax.streamplot(X, Y, B_x, B_y,
                         color=color, linewidth=1, cmap=plt.cm.inferno, density=2, arrowstyle='->', arrowsize=1.5)
@@ -159,13 +172,77 @@ def display_interplanetary_magnetic_field(U, R, B0, r0, phi0, theta):
     animation = FuncAnimation(fig, update, frames=np.arange(1, 100, 1), interval=25, blit=False)
 
     # Save the animation as an MP4 file
-    animation.save('updated_parker_spiral.mp4', fps=10, extra_args=['-vcodec', 'libx264'])
+    # animation.save('updated_parker_spiral.mp4', fps=10, extra_args=['-vcodec', 'libx264'])
 
     # Show the plot
     plt.xlabel('X [100*AU]', font="Times New Roman", fontsize=20, fontweight='bold')
     plt.ylabel('Y [100*AU]', font="Times New Roman", fontsize=20, fontweight='bold')
     plt.title('Parker Spiral B-field Model', font="Times New Roman", fontsize=20, fontweight='bold')
-    # plt.show()
+    plt.show()
+    return animation
+
+# || Animate state vector in 3d
+def animate_state_vector_3d(state_vector, timestamps):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Set initial plot data
+    line, = ax.plot([], [], [], lw=2)
+    ax.set_xlim3d(np.min(state_vector[:, 0]), np.max(state_vector[:, 0]))
+    ax.set_ylim3d(np.min(state_vector[:, 1]), np.max(state_vector[:, 1]))
+    ax.set_zlim3d(np.min(state_vector[:, 2]), np.max(state_vector[:, 2]))
+
+    # Function to update the plot for each frame
+    def update(frame):
+        line.set_data(state_vector[:frame, 0], state_vector[:frame, 1])
+        line.set_3d_properties(state_vector[:frame, 2])
+        # ax.set_title(f'Time: {timestamps[frame]:.2f}', fontsize=20, fontweight='bold', fontname='Times New Roman')
+        ax.set_xlabel('X', fontsize=20, fontweight='bold', fontname='Times New Roman')
+        ax.set_ylabel('Y', fontsize=20, fontweight='bold', fontname='Times New Roman')
+        ax.set_zlabel('Z', fontsize=20, fontweight='bold', fontname='Times New Roman')
+        return line,
+
+    # Create animation
+    ani = FuncAnimation(fig, update, frames=len(timestamps), interval=10, blit=True)
+    
+    plt.show()
+
+def animate_state_vector_xy(state_vector, timestamps):
+    fig, ax = plt.subplots()
+
+    # Set initial plot data
+    line, = ax.plot([], [], lw=2)
+    # ax.set_xlim(np.min(state_vector[:, 0]), np.max(state_vector[:, 0]))
+    # ax.set_ylim(np.min(state_vector[:, 1]), np.max(state_vector[:, 1]))
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-1, 1)
+
+    # Function to update the plot for each frame
+    def update(frame):
+        line.set_data(state_vector[:frame, 0], state_vector[:frame, 1])
+        # ax.set_title(f'Time: {timestamps[frame]:.2f}', fontsize=20, fontweight='bold', fontname='Times New Roman')
+        ax.set_xlabel('X', fontsize=20, fontweight='bold', fontname='Times New Roman')
+        ax.set_ylabel('Y', fontsize=20, fontweight='bold', fontname='Times New Roman')
+        return line,
+
+    # Create animation
+    ani = FuncAnimation(fig, update, frames=len(timestamps), interval=50, blit=True)
+    
+    plt.show()
+    return ani
+
+# || Combine the animations using ffmpeg
+def combine_animations(particle_animation, magnetic_field_animation):
+    # Save the animations as temporary files
+    particle_animation.save('particle_animation.mp4', fps=10, extra_args=['-vcodec', 'libx264'])
+    magnetic_field_animation.save('magnetic_field_animation.mp4', fps=10, extra_args=['-vcodec', 'libx264'])
+
+    # Combine the animations using ffmpeg
+    command = 'ffmpeg -i magnetic_field_animation.mp4 -i particle_animation.mp4 -filter_complex overlay=0:0 all_animations.mp4'
+    subprocess.run(command, shell=True)
+
+
+
 
 # %%
 # || Executable Code
@@ -178,21 +255,30 @@ if __name__ == "__main__":
     r0 = 0.1
     phi0 = 0.0
     theta = np.pi / 4  # Example value for theta
-    # display_interplanetary_magnetic_field(U, R, B0, r0, phi0, theta)
+    magnetic_field_animation = display_interplanetary_magnetic_field(U, R, B0, r0, phi0, theta)
 
     # || Integrator Parameters
 
     # Define parameters
-    q = 1  # Charge of the particle (e.g., electron)
-    E = np.array([0, 0, 1])  # Electric field vector [Ex, Ey, Ez]
-    B = np.array([0, 1, 0])  # Magnetic field vector [Bx, By, Bz]
-    initial_conditions = np.array([0, 0, 0, 1, 1, 1])  # Initial conditions [x0, y0, z0, vx0, vy0, vz0]
-    t = np.linspace(0, 10, 100)  # Time array
-    
+    q = 1.6e-19  # Charge of the particle (e.g., electron)
+    E = np.array([0, 0, 0])  # Electric field vector [Ex, Ey, Ez]
+
+    initial_conditions = np.array([.5, .5, 0, -1, 1, 0])  # Initial conditions [x0, y0, z0, vx0, vy0, vz0]
+    t = np.linspace(0, 1, 100)  # Time array
+
     # Integrate the Lorentz force equation
-    y = integrate_lorentz_force(q, E, B, initial_conditions, t)
-    
+    y = integrate_lorentz_force(q, E, initial_conditions, t, U, R, B0, r0, phi0, theta)
+
     # Print the final state vector
     print("Final state vector:")
-    print(y[-1])
+    print(y)
 
+    timestamps = np.linspace(0, 1, len(y))
+
+    # Animate the state vector in both 3d and 2d
+    animate_state_vector_3d(y, timestamps)
+    particle_animation = animate_state_vector_xy(y[:, :2], timestamps)
+
+    # Overlay particle trajectory onto spiral
+    # magnetic_field_animation = display_interplanetary_magnetic_field(U, R, B0, r0, phi0, theta)
+    combine_animations(particle_animation, magnetic_field_animation)
