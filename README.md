@@ -58,6 +58,16 @@ It combines a high-performance Fortran integrator with pure-Python and GPU backe
 
 ## Installation
 
+### macOS one-shot setup
+
+If you are on macOS and just want everything configured automatically, run the helper script:
+
+```bash
+./scripts/setup_mac.sh
+```
+
+The script will ensure Homebrew, Python 3.11, `gfortran`, the virtual environment, Python dependencies, the smoke-test suite, and the Fortran backend are all in place.  When it finishes you can activate the environment with `source .venv/bin/activate`.
+
 ### 1. Create a Python virtual environment
 
 ```bash
