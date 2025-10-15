@@ -56,6 +56,8 @@ def build_module(force: bool = False) -> ModuleType:
         "-m",
         MODULE_NAME,
         "--quiet",
+        "--backend",
+        "distutils",
         "--opt=-O3",
         "--opt=-fopenmp",
         "--f90flags=-fopenmp",
