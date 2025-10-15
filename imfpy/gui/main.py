@@ -27,8 +27,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..simulation import ParticleEnsemble, SimulationConfig, SimulationRunner
-from ..simulation.results import SimulationResult
+from imfpy.simulation import ParticleEnsemble, SimulationConfig, SimulationRunner
+from imfpy.simulation.results import SimulationResult
+
 from .help import DiagnosticsDialog, HelpDialog, open_docs_folder
 from .widgets import ParticleTableWidget, VectorInput
 
