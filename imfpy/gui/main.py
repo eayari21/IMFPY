@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import sys
 import traceback
+
+import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -15,6 +18,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QFileDialog,
     QPushButton,
     QSpinBox,
     QSplitter,
@@ -25,6 +29,7 @@ from PyQt6.QtWidgets import (
 
 from ..simulation import ParticleEnsemble, SimulationConfig, SimulationRunner
 from ..simulation.results import SimulationResult
+from .help import DiagnosticsDialog, HelpDialog, open_docs_folder
 from .widgets import ParticleTableWidget, VectorInput
 
 
@@ -80,9 +85,14 @@ class SimulationWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("IMFPY Dust Trajectory Simulator")
         self.thread_pool = QThreadPool.globalInstance()
+        self._help_dialog: HelpDialog | None = None
+        self._diagnostics_dialog: DiagnosticsDialog | None = None
+        self._last_result: SimulationResult | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
+        self._build_menus()
+
         central = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(central)
 
@@ -94,37 +104,45 @@ class SimulationWindow(QMainWindow):
         self.particle_spin = QSpinBox()
         self.particle_spin.setRange(1, 10_000)
         self.particle_spin.setValue(4)
+        self.particle_spin.setToolTip("Number of dust particles to integrate.")
         form.addRow("Particles", self.particle_spin)
 
         self.step_spin = QSpinBox()
         self.step_spin.setRange(10, 200_000)
         self.step_spin.setValue(2000)
+        self.step_spin.setToolTip("Total integration steps to perform.")
         form.addRow("Steps", self.step_spin)
 
         self.dt_spin = QDoubleSpinBox()
         self.dt_spin.setDecimals(6)
         self.dt_spin.setRange(1e-6, 1e9)
         self.dt_spin.setValue(60.0)
+        self.dt_spin.setToolTip("Time step (seconds) between integration points.")
         form.addRow("Δt (s)", self.dt_spin)
 
         self.gm_spin = QDoubleSpinBox()
         self.gm_spin.setDecimals(6)
         self.gm_spin.setRange(1e-6, 1e30)
         self.gm_spin.setValue(1.32712440018e20)
+        self.gm_spin.setToolTip("Gravitational parameter GM of the central body (m^3/s^2).")
         form.addRow("GM (m^3/s^2)", self.gm_spin)
 
         self.backend_combo = QComboBox()
         self.backend_combo.addItems(["fortran", "python", "gpu"])
+        self.backend_combo.setToolTip("Select the simulation backend (availability depends on installed dependencies).")
         form.addRow("Backend", self.backend_combo)
 
         control_layout.addLayout(form)
 
         self.e_field_input = VectorInput("Electric field (V/m)")
         self.b_field_input = VectorInput("Magnetic field (T)")
+        self.e_field_input.setToolTip("Uniform electric field applied to all particles (V/m).")
+        self.b_field_input.setToolTip("Uniform magnetic field applied to all particles (tesla).")
         control_layout.addWidget(self.e_field_input)
         control_layout.addWidget(self.b_field_input)
 
         self.table = ParticleTableWidget()
+        self.table.setToolTip("Edit particle initial conditions, mass, charge, and radiation-pressure β.")
         control_layout.addWidget(self.table)
         self.table.set_particle_count(self.particle_spin.value())
         self.table.populate_circular_orbit()
@@ -132,6 +150,8 @@ class SimulationWindow(QMainWindow):
         button_layout = QHBoxLayout()
         self.run_button = QPushButton("Run Simulation")
         self.reset_button = QPushButton("Reset")
+        self.run_button.setToolTip("Start the simulation with the current settings.")
+        self.reset_button.setToolTip("Restore default parameters and circular orbit ensemble.")
         button_layout.addWidget(self.run_button)
         button_layout.addWidget(self.reset_button)
         control_layout.addLayout(button_layout)
@@ -156,6 +176,29 @@ class SimulationWindow(QMainWindow):
         self.status_label = QLabel("Ready")
         status.addWidget(self.status_label)
         self.setStatusBar(status)
+
+    def _build_menus(self) -> None:
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu("&File")
+        self.export_action = QAction("Export Result…", self)
+        self.export_action.setEnabled(False)
+        self.export_action.triggered.connect(self._export_result)
+        file_menu.addAction(self.export_action)
+
+        help_menu = menu_bar.addMenu("&Help")
+        self.quick_start_action = QAction("Quick Start Guide", self)
+        self.quick_start_action.setShortcut(QKeySequence.StandardKey.HelpContents)
+        self.quick_start_action.triggered.connect(self._show_help)
+        help_menu.addAction(self.quick_start_action)
+
+        diagnostics_action = QAction("Diagnostics", self)
+        diagnostics_action.triggered.connect(self._show_diagnostics)
+        help_menu.addAction(diagnostics_action)
+
+        docs_action = QAction("Open Documentation Folder", self)
+        docs_action.triggered.connect(lambda: open_docs_folder(self))
+        help_menu.addAction(docs_action)
 
     def _reset(self) -> None:
         self.table.populate_circular_orbit()
@@ -198,11 +241,51 @@ class SimulationWindow(QMainWindow):
         self.canvas.plot_result(result)
         self.status_label.setText("Simulation finished")
         self.run_button.setEnabled(True)
+        self._last_result = result
+        self.export_action.setEnabled(True)
 
     def _simulation_failed(self, message: str) -> None:
         QMessageBox.critical(self, "Simulation failed", message)
         self.status_label.setText("Error")
         self.run_button.setEnabled(True)
+
+    def _show_help(self) -> None:
+        if self._help_dialog is None:
+            self._help_dialog = HelpDialog(self)
+        self._help_dialog.show()
+        self._help_dialog.raise_()
+        self._help_dialog.activateWindow()
+
+    def _show_diagnostics(self) -> None:
+        if self._diagnostics_dialog is None:
+            self._diagnostics_dialog = DiagnosticsDialog(self)
+        self._diagnostics_dialog.refresh()
+        self._diagnostics_dialog.show()
+        self._diagnostics_dialog.raise_()
+        self._diagnostics_dialog.activateWindow()
+
+    def _export_result(self) -> None:
+        if self._last_result is None:
+            QMessageBox.information(self, "No result", "Run a simulation before exporting.")
+            return
+
+        default_name = "trajectory_run.npz"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Simulation Result",
+            default_name,
+            "NumPy archive (*.npz)",
+        )
+        if not path:
+            return
+
+        np.savez(
+            path,
+            times=self._last_result.times,
+            state=self._last_result.state,
+            backend=self._last_result.backend,
+        )
+        self.status_label.setText(f"Exported result to {path}")
 
 
 def run() -> None:
