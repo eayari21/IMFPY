@@ -1,0 +1,8 @@
+Magnetite, 5170. , 0.12e-6         # material, density rho,  diameter a
+3.E8,  1.0, 1361., 2.0, 1.e6, 4.e5  #  c, d,Sd,B0,z0,v0
+0.,3.e6,3.e6,9.e6,150.,150.,-400.   # t_initial, ux0,uy0,uz0, vx0,vy0,vz0
+1.                                   # simulation_time_step
+120                                  #N_simulation_steps
+20                                  # nstep iterations within a step
+
+
