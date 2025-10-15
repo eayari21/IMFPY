@@ -44,7 +44,13 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-from integrator import display_interplanetary_magnetic_field, interplanetary_magnetic_field, integrate_lorentz_force, animate_state_vector_3d, animate_all
+from .integrator import (
+    display_interplanetary_magnetic_field,
+    interplanetary_magnetic_field,
+    integrate_lorentz_force,
+    animate_state_vector_3d,
+    animate_all,
+)
 from matplotlib.animation import FuncAnimation
 
 animation_layout = QVBoxLayout()
