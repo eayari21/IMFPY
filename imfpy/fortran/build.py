@@ -1,9 +1,10 @@
 """Utilities to build and load the Fortran dust integrator module."""
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
-import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Optional
@@ -65,9 +66,29 @@ def build_module(force: bool = False) -> ModuleType:
     env.setdefault("NPY_DISTUTILS_APPEND_FLAGS", "1")
 
     cwd = os.getcwd()
+    stdout_buffer = io.StringIO()
+    stderr_buffer = io.StringIO()
+
     try:
         os.chdir(_BUILD_DIR)
-        f2py_main(args)
+        try:
+            with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(
+                stderr_buffer
+            ):
+                f2py_main(args)
+        except SystemExit as exc:  # pragma: no cover - depends on numpy behaviour
+            code = exc.code if isinstance(exc.code, int) else 1
+            if code not in (0, None):
+                output = stdout_buffer.getvalue().strip()
+                errors = stderr_buffer.getvalue().strip()
+                combined = "\n".join(part for part in (output, errors) if part)
+                message = "F2PY failed to compile the Fortran backend"
+                if combined:
+                    message = f"{message}:\n{combined}"
+                raise FortranBuildError(message) from exc
+        finally:
+            stdout_buffer.close()
+            stderr_buffer.close()
     finally:
         os.chdir(cwd)
 
