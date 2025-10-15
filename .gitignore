@@ -1,0 +1,4 @@
+imfpy/fortran/_build/
+__pycache__/
+*.pyc
+.DS_Store
