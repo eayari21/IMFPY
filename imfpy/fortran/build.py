@@ -1,7 +1,7 @@
-import sys
-import sys
-"""Utilities to build and load the Fortran dust integrator module."""
 from __future__ import annotations
+import sys
+import subprocess
+"""Utilities to build and load the Fortran dust integrator module."""
 
 import contextlib
 import importlib.util
@@ -10,8 +10,6 @@ import os
 from pathlib import Path
 from types import ModuleType
 from typing import Optional
-
-from numpy.f2py.__main__ import main as f2py_main
 
 MODULE_NAME = "dust_integrator"
 _BUILD_DIR = Path(__file__).with_name("_build")
@@ -79,7 +77,7 @@ def build_module(force: bool = False) -> ModuleType:
             with contextlib.redirect_stdout(stdout_buffer), contextlib.redirect_stderr(
                 stderr_buffer
             ):
-                f2py_main(args)
+                _f2py_run(args)
         except SystemExit as exc:  # pragma: no cover - depends on numpy behaviour
             code = exc.code if isinstance(exc.code, int) else 1
             if code not in (0, None):
@@ -116,3 +114,8 @@ def load_module() -> ModuleType:
 
 
 __all__ = ["MODULE_NAME", "build_module", "load_module", "FortranBuildError"]
+
+
+def _f2py_run(args):
+    cmd = [sys.executable, '-m', 'numpy.f2py', *args]
+    subprocess.run(cmd, check=True)

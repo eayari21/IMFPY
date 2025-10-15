@@ -27,7 +27,7 @@ def _derivatives_numpy(
 ) -> np.ndarray:
     positions = state[:, :3]
     velocities = state[:, 3:]
-    r = np.linalg.norm(positions, axis=1)
+    r = np.sqrt((positions * positions).sum(axis=1))
     r3 = np.where(r > 1e-12, r**3, np.inf)
     grav_coeff = -gm_sun * (1.0 - beta) / r3
     grav = positions * grav_coeff[:, None]
