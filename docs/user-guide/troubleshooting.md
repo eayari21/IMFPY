@@ -35,6 +35,7 @@ Inside the GUI, open **Help → Diagnostics** to see the same information in a d
 | Simulation never finishes; status bar stuck on *Running…* | Backend exception in worker thread | Check the terminal for stack traces.  Open **Help → Diagnostics** and run `python -m imfpy.simulation.runner --self-test` to isolate the failing backend. |
 | 3D viewer blank | Matplotlib backend not initialised | Ensure `matplotlib` is installed (comes via requirements).  Try running `python -c "import matplotlib"` to confirm. |
 | Particle table does not update when changing counts | Pending validation error | Ensure all numeric fields contain valid numbers (no empty cells).  Press **Reset** to repopulate defaults. |
+| `TypeError: scaledToHeight(... AspectRatioMode)` when opening HDF plotter | Qt 6 tightened the `QPixmap.scaledToHeight` signature; passing an aspect ratio enum now raises | Replace the call with `pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)` or use `pixmap.scaled(width, height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)` so the last argument is a `Qt.TransformationMode`. |
 
 ---
 
