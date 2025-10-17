@@ -22,6 +22,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QSplitter,
+    QScrollArea,
+    QSizePolicy,
+    QStackedWidget,
     QStatusBar,
     QVBoxLayout,
     QWidget,
@@ -61,6 +64,7 @@ class SimulationCanvas(FigureCanvasQTAgg):
         self.figure = Figure(figsize=(6, 5))
         super().__init__(self.figure)
         self.setParent(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.axes = self.figure.add_subplot(111, projection="3d")
         self.figure.tight_layout()
 
@@ -86,22 +90,79 @@ class SimulationWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("IMFPY Dust Trajectory Simulator")
         self.thread_pool = QThreadPool.globalInstance()
+        self.stack = QStackedWidget()
+        self.setCentralWidget(self.stack)
         self._help_dialog: HelpDialog | None = None
         self._diagnostics_dialog: DiagnosticsDialog | None = None
         self._last_result: SimulationResult | None = None
-        self._build_ui()
-
-    def _build_ui(self) -> None:
+        status = QStatusBar()
+        self.status_label = QLabel("Welcome")
+        status.addWidget(self.status_label)
+        self.setStatusBar(status)
         self._build_menus()
+        self._build_pages()
 
-        central = QSplitter(Qt.Orientation.Horizontal)
-        self.setCentralWidget(central)
+    def _build_pages(self) -> None:
+        self.launch_widget = self._create_launch_screen()
+        self.main_widget = self._create_main_screen()
+        self.stack.addWidget(self.launch_widget)
+        self.stack.addWidget(self.main_widget)
+        self.stack.setCurrentWidget(self.launch_widget)
+
+    def _create_launch_screen(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(48, 48, 48, 48)
+        layout.setSpacing(24)
+        layout.addStretch(1)
+
+        title = QLabel("Welcome to the IMFPY Dust Trajectory Simulator")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setWordWrap(True)
+        title.setStyleSheet("font-size: 24pt; font-weight: 600;")
+        layout.addWidget(title)
+
+        subtitle = QLabel(
+            "Craft ensembles of particles, run the integrator, and inspect the trajectories."
+        )
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(16)
+        button_row.addStretch(1)
+
+        start_button = QPushButton("Start a Simulation")
+        start_button.setMinimumWidth(220)
+        start_button.setDefault(True)
+        start_button.clicked.connect(self._show_main_view)
+        button_row.addWidget(start_button)
+
+        quickstart_button = QPushButton("Quick Start Guide")
+        quickstart_button.clicked.connect(self._show_help)
+        button_row.addWidget(quickstart_button)
+
+        button_row.addStretch(1)
+        layout.addLayout(button_row)
+        layout.addStretch(2)
+
+        return widget
+
+    def _create_main_screen(self) -> QWidget:
+        main = QWidget()
+        main_layout = QVBoxLayout(main)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
 
         control_widget = QWidget()
         control_layout = QVBoxLayout(control_widget)
-        control_layout.setContentsMargins(8, 8, 8, 8)
+        control_layout.setContentsMargins(12, 12, 12, 12)
+        control_layout.setSpacing(12)
 
         form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
         self.particle_spin = QSpinBox()
         self.particle_spin.setRange(1, 10_000)
         self.particle_spin.setValue(4)
@@ -130,7 +191,9 @@ class SimulationWindow(QMainWindow):
 
         self.backend_combo = QComboBox()
         self.backend_combo.addItems(["fortran", "python", "gpu"])
-        self.backend_combo.setToolTip("Select the simulation backend (availability depends on installed dependencies).")
+        self.backend_combo.setToolTip(
+            "Select the simulation backend (availability depends on installed dependencies)."
+        )
         form.addRow("Backend", self.backend_combo)
 
         control_layout.addLayout(form)
@@ -149,10 +212,13 @@ class SimulationWindow(QMainWindow):
         self.table.populate_circular_orbit()
 
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
         self.run_button = QPushButton("Run Simulation")
         self.reset_button = QPushButton("Reset")
         self.run_button.setToolTip("Start the simulation with the current settings.")
         self.reset_button.setToolTip("Restore default parameters and circular orbit ensemble.")
+        self.run_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.reset_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         button_layout.addWidget(self.run_button)
         button_layout.addWidget(self.reset_button)
         control_layout.addLayout(button_layout)
@@ -162,21 +228,34 @@ class SimulationWindow(QMainWindow):
         self.reset_button.clicked.connect(self._reset)
         self.particle_spin.valueChanged.connect(self.table.set_particle_count)
 
+        control_container = QScrollArea()
+        control_container.setWidgetResizable(True)
+        control_container.setWidget(control_widget)
+        control_container.setMinimumWidth(360)
+
         plot_widget = QWidget()
         plot_layout = QVBoxLayout(plot_widget)
+        plot_layout.setContentsMargins(12, 12, 12, 12)
+        plot_layout.setSpacing(12)
         self.canvas = SimulationCanvas()
+        self.canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        self.toolbar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         plot_layout.addWidget(self.toolbar)
         plot_layout.addWidget(self.canvas)
 
-        central.addWidget(control_widget)
-        central.addWidget(plot_widget)
-        central.setSizes([400, 800])
+        splitter.addWidget(control_container)
+        splitter.addWidget(plot_widget)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
 
-        status = QStatusBar()
-        self.status_label = QLabel("Ready")
-        status.addWidget(self.status_label)
-        self.setStatusBar(status)
+        main_layout.addWidget(splitter)
+        return main
+
+    def _show_main_view(self) -> None:
+        self.stack.setCurrentWidget(self.main_widget)
+        self.status_label.setText("Ready")
+        self.run_button.setFocus()
 
     def _build_menus(self) -> None:
         menu_bar = self.menuBar()
@@ -292,7 +371,14 @@ class SimulationWindow(QMainWindow):
 def run() -> None:
     app = QApplication(sys.argv)
     window = SimulationWindow()
-    window.resize(1280, 720)
+    screen = app.primaryScreen()
+    if screen is not None:
+        available = screen.availableGeometry()
+        width = int(available.width() * 0.8)
+        height = int(available.height() * 0.8)
+        window.resize(width, height)
+    else:
+        window.resize(1280, 720)
     window.show()
     sys.exit(app.exec())
 
