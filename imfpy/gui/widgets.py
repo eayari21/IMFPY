@@ -10,9 +10,11 @@ from PyQt6.QtGui import QRegularExpressionValidator
 from PyQt6.QtWidgets import (
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -38,9 +40,12 @@ class ParticleTableWidget(QGroupBox):
         super().__init__("Particle Parameters", parent)
         self.table = QTableWidget(0, len(self.headers))
         self.table.setHorizontalHeaderLabels(self.headers)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
+        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(self)
         layout.addWidget(self.table)
 
@@ -151,6 +156,9 @@ class VectorInput(QWidget):
             field.setText(f"{values[i]:.6g}")
             layout.addWidget(field, 1, i + 1)
             self.fields.append(field)
+        layout.setColumnStretch(0, 2)
+        for col in range(1, 4):
+            layout.setColumnStretch(col, 1)
 
     def vector(self) -> np.ndarray:
         values = []
