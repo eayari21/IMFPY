@@ -2,3 +2,9 @@ imfpy/fortran/_build/
 __pycache__/
 *.pyc
 .DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+build/
+dist/
