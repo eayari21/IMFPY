@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: "IMFPY"
+message: "If you use this software, please cite it via the DOI."
+type: software
+authors:
+  - family-names: Ayari
+    given-names: Ethan
+    orcid: "https://orcid.org/0000-0000-0000-0000"
+repository-code: "https://github.com/eayari21/1_Codes"
+license: "LicenseRef-APND-1.0"
+version: "0.0.0"
+doi: "10.5281/zenodo.XXXXXXX"
+preferred-citation:
+  type: software
+  title: "IMFPY"
+  authors:
+    - family-names: Ayari
+      given-names: Ethan
+  year: 2025
+  doi: "10.5281/zenodo.XXXXXXX"

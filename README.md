@@ -208,3 +208,36 @@ These files are packaged with the application and can be opened from inside the 
 ## License
 
 MIT (or specify the actual licence applicable to your project).
+
+<!-- policy:begin -->
+## License
+
+This repository is released under the **Ayari Public No-Derivatives License (APND) v1.0**.
+You may **download and use the software as-is**. You may **not** modify it or distribute
+modified versions without written permission. See [`LICENSE`](./LICENSE).
+
+## Citation & DOI
+
+If you use this software in research or a product, please **cite it**. We archive
+releases on **Zenodo** to mint a DOI.
+
+**How to cite (example):**
+> Ayari, E. (2025). IMFPY (vX.Y.Z) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.XXXXXXX
+
+After you create your first Zenodo-backed GitHub release, replace the placeholder above and add the badge:
+
+```
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
+```
+
+## Contributing
+
+This is a **read-only** public release. We do **not** accept external pull requests or patches.
+Please open an **issue** for bugs or feature requests. For derivative-use exceptions, contact the author.
+
+## Repro/Use
+
+- Clone or download a release tarball.
+- Use **unmodified** sources/binaries as described in the docs.
+- Do **not** redistribute modified versions.
+<!-- policy:end -->

@@ -76,10 +76,10 @@ class SimulationCanvas(FigureCanvasQTAgg):
             traj = positions[:, idx, :]
             self.axes.plot(traj[:, 0], traj[:, 1], traj[:, 2], label=f"Particle {idx+1}")
             self.axes.scatter(traj[0, 0], traj[0, 1], traj[0, 2], marker="o")
-        self.axes.scatter([0], [0], [0], color="gold", marker="*", s=200, label="Star")
-        self.axes.set_xlabel("x (m)")
-        self.axes.set_ylabel("y (m)")
-        self.axes.set_zlabel("z (m)")
+        self.axes.scatter([0], [0], [0], color="gold", marker="*", s=200, label="Sun")
+        self.axes.set_xlabel("x [AU]")
+        self.axes.set_ylabel("y [AU]")
+        self.axes.set_zlabel("z [AU]")
         self.axes.legend(loc="upper right")
         self.axes.set_title(f"Trajectories ({result.backend})")
         self.figure.canvas.draw_idle()
@@ -198,8 +198,8 @@ class SimulationWindow(QMainWindow):
 
         control_layout.addLayout(form)
 
-        self.e_field_input = VectorInput("Electric field (V/m)")
-        self.b_field_input = VectorInput("Magnetic field (T)")
+        self.e_field_input = VectorInput("Electric field [V/m]")
+        self.b_field_input = VectorInput("Magnetic field [T]")
         self.e_field_input.setToolTip("Uniform electric field applied to all particles (V/m).")
         self.b_field_input.setToolTip("Uniform magnetic field applied to all particles (tesla).")
         control_layout.addWidget(self.e_field_input)
