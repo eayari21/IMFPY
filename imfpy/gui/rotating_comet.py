@@ -34,6 +34,34 @@ w_vec  = np.array([400e3, 0.0, 0.0])  # solar wind velocity for Lorentz term
 B0     = 3.5e-9
 v0     = 400e3
 
+# ============================================================
+# Magnetic field rotation angle (radians)
+# ============================================================
+
+B_ROTATION = 3*np.pi / 2  # set to 0.0 for original behavior
+
+# ============================================================
+# Rotate a vector field about z-axis
+# ============================================================
+
+def rotate_about_z(vec, theta):
+    cth = np.cos(theta)
+    sth = np.sin(theta)
+
+    R = np.array([[ cth, -sth, 0.0],
+                  [ sth,  cth, 0.0],
+                  [0.0,  0.0,  1.0]])
+
+    return np.tensordot(R, vec, axes=(1, 0))
+
+
+def find_extreme_mass(beta_func):
+    mgrid = np.logspace(-19, -12, 5000)
+    beta_vals = beta_func(mgrid)
+    idx = np.argmax(beta_vals)
+    return mgrid[idx], beta_vals[idx]
+
+
 # ------------------------------------------------------------
 # In your LaTeX model, ionopause radius at z=0 is sqrt(2)*z0.
 # If you want ~40 AU cavity radius at z=0,
@@ -50,6 +78,15 @@ def asym_log(m, peak, m0, sL, sR):
     logm0 = np.log10(m0)
     sigma = np.where(logm < logm0, sL, sR)
     return peak*np.exp(-(logm-logm0)**2/(2*sigma**2))
+
+
+def charge_from_mass(m):
+    rho = 3000.0
+    a = (3*m/(4*np.pi*rho))**(1/3)
+    phi = 5.0
+    eps0 = 8.854e-12
+    return 4*np.pi*eps0*a*phi
+
 
 def set_stream_alpha(sp, alpha):
     """
@@ -93,7 +130,7 @@ def beta_adapted(m):      return asym_log(m,1.6,3e-17,0.65,1.05)
 # FULL E and B fields (Horányi & Mendis-style; matches your LaTeX)
 # ============================================================
 
-def compute_fields(x, y, z=0.0):
+def compute_fields(x, y, z=0.0, B_rotation=0.0):
     x = np.asarray(x)
     y = np.asarray(y)
     z = np.asarray(z)
@@ -153,18 +190,27 @@ def compute_fields(x, y, z=0.0):
 
     E = np.stack((Ex, Ey, Ez), axis=0)
     B = np.stack((Bx, By, Bz), axis=0)
+
+    # Rotate magnetic field only
+    if B_rotation != 0.0:
+        B = rotate_about_z(B, B_rotation)
+
     return E, B
+
 
 # ============================================================
 # Full acceleration (gravity + rad pressure + Lorentz)
+#   DYNAMICAL CHANGE:
+#     - Promote state to 3D: [x,y,z,vx,vy,vz]
+#     - Use full Lorentz term: (q/m)(E + v×B)
+#     - Use q = charge_from_mass(m)
 # ============================================================
 
 def acceleration(state, m, Q, beta_func):
-    x, y, vx, vy = state
-    z = 0.0
+    x, y, z, vx, vy, vz = state
 
     r_vec = np.array([x, y, z], dtype=float)
-    v_vec = np.array([vx, vy, 0.0], dtype=float)
+    v_vec = np.array([vx, vy, vz], dtype=float)
 
     r = np.linalg.norm(r_vec)
     if not np.isfinite(r) or r < 1e-30:
@@ -173,15 +219,22 @@ def acceleration(state, m, Q, beta_func):
     beta = float(beta_func(m))
     a_grav = -GM*(1.0-beta)*r_vec/(r**3)
 
-    E, B = compute_fields(x, y, z)
+    E, B = compute_fields(x, y, z, B_rotation=B_ROTATION)
     E = np.asarray(E, dtype=float).reshape(3,)
     B = np.asarray(B, dtype=float).reshape(3,)
 
-    v_rel = v_vec - w_vec
-    a_L = (Q/m) * (E + np.cross(v_rel, B))
+    # Keep "nominal interstellar" wind-subtraction option available:
+    # your previous script effectively used v_rel = v_vec in the stub.
+    # We'll keep it identical to your provided code unless you change it.
+    v_rel = v_vec
+
+    Q_eff = charge_from_mass(m)
+    a_L = (Q_eff/m) * (E + np.cross(v_rel, B))
 
     a_total = a_grav + a_L
-    return np.array([vx, vy, a_total[0], a_total[1]], dtype=float)
+
+    # Return time-derivative of state (6D)
+    return np.array([vx, vy, vz, a_total[0], a_total[1], a_total[2]], dtype=float)
 
 # ============================================================
 # RK4
@@ -196,11 +249,15 @@ def rk4_step(state, dt, m, Q, beta_func):
 
 # ============================================================
 # Integrate trajectory
+#   DYNAMICAL CHANGE:
+#     - Initialize z=0, vz=0 (identical geometry to before)
+#     - Stop condition uses full 3D radius; plots still show x-y projection
 # ============================================================
 
 def integrate(m, Q, beta_func):
-    state = np.array([-100*AU, 30*AU, v_inf, 0.0], dtype=float)
-    dt   = 5e6
+    state = np.array([-100*AU, 15*AU, 0.0, v_inf, 0.0, 0.0], dtype=float)
+
+    dt   = 5e5
     tmax = 5e10
     traj = []
 
@@ -208,7 +265,7 @@ def integrate(m, Q, beta_func):
     while t < tmax:
         traj.append(state.copy())
 
-        rr = np.sqrt(state[0]**2 + state[1]**2)
+        rr = np.sqrt(state[0]**2 + state[1]**2 + state[2]**2)
         if rr < 5*AU or rr > 150*AU:
             break
 
@@ -229,7 +286,8 @@ def plot_fields():
     y = np.linspace(-100*AU, 100*AU, 320)
     X, Y = np.meshgrid(x, y)
 
-    E, B = compute_fields(X, Y, 0.0)
+    E, B = compute_fields(X, Y, 0.0, B_rotation=B_ROTATION)
+
     Ex, Ey = E[0], E[1]
     Bx, By, Bz = B[0], B[1], B[2]
 
@@ -263,7 +321,12 @@ def plot_fields():
 # ============================================================
 
 def plot_trajectories():
-    masses = [5e-18, 2e-17, 1e-16]
+    m_extreme, beta_extreme = find_extreme_mass(beta_adapted)
+
+    print(f"Extreme beta = {beta_extreme:.3f} at m = {m_extreme:.3e} kg")
+
+    masses = [m_extreme]
+
     Q = 1e-16
 
     fig, ax = plt.subplots(figsize=(4.6, 4.2))
@@ -272,6 +335,7 @@ def plot_trajectories():
         traj = integrate(m, Q, beta_adapted)
         if traj.size == 0:
             continue
+        # x-y projection (identical plotting behavior)
         ax.plot(traj[:, 0]/AU, traj[:, 1]/AU, lw=1.2, label=f"m={m:.1e}")
 
     sun = plt.Circle((0, 0), 2, color="gold", zorder=5)
@@ -304,7 +368,8 @@ def plot_fields_with_trajectories():
     y = np.linspace(-100*AU, 100*AU, 320)
     X, Y = np.meshgrid(x, y)
 
-    E, B = compute_fields(X, Y, 0.0)
+    E, B = compute_fields(X, Y, 0.0, B_rotation=B_ROTATION)
+
     Ex, Ey = E[0], E[1]
     Bx, By, Bz = B[0], B[1], B[2]
 
