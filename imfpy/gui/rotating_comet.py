@@ -129,6 +129,7 @@ def compute_fields(x, y, z=0.0, B_rotation=0.0):
     if z.shape == ():
         z = z + np.zeros_like(x)
 
+    x = x - 40*AU
     r2 = x**2 + y**2
     r  = np.sqrt(r2)
     R  = np.sqrt(r2 + z**2)
@@ -136,7 +137,8 @@ def compute_fields(x, y, z=0.0, B_rotation=0.0):
     r_safe = np.where(r == 0.0, 1e-30, r)
     R_safe = np.where(R == 0.0, 1e-30, R)
 
-    S2 = r2 + 2.0*(z0**2)*(z/R_safe - 1.0)
+    # Use x as heliospheric axis so the z=0 slice shows the paraboloid
+    S2 = r2 + 2.0*(z0**2)*(x/R_safe - 1.0)
     cavity = S2 <= 0.0
     S = np.sqrt(np.where(cavity, np.nan, S2))
 
@@ -443,6 +445,9 @@ def run_parameter_sweep():
 # ============================================================
 
 if __name__ == "__main__":
+    # B_ROTATION = np.pi/4
+    # plot_fields()
+
     plot_fields()
     plot_trajectories()
     plot_fields_with_trajectories()
