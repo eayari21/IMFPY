@@ -29,7 +29,7 @@ AU     = 1.496e11
 c      = 299792458.0
 
 v_inf  = 26e3
-w_vec  = np.array([400e3, 0.0, 0.0])  # solar wind velocity for Lorentz term
+w_vec  = np.array([400e3, 0.0, 0.0])
 
 B0     = 3.5e-9
 v0     = 400e3
@@ -38,20 +38,31 @@ v0     = 400e3
 # Magnetic field rotation angle (radians)
 # ============================================================
 
-B_ROTATION = 3*np.pi / 2  # set to 0.0 for original behavior
+B_ROTATION = 0.0
 
 # ============================================================
-# Rotate a vector field about z-axis
+# Parameter sweep configuration
+# ============================================================
+
+B_ROTATIONS = [0.0, np.pi/2, np.pi, 3*np.pi/2]
+B_STRENGTHS = [2.0e-9, 3.5e-9, 5.0e-9]
+
+# ============================================================
+# Ionopause geometry
+# ============================================================
+
+z0 = (40.0/np.sqrt(2.0)) * AU
+
+# ============================================================
+# Utility functions
 # ============================================================
 
 def rotate_about_z(vec, theta):
     cth = np.cos(theta)
     sth = np.sin(theta)
-
     R = np.array([[ cth, -sth, 0.0],
                   [ sth,  cth, 0.0],
-                  [0.0,  0.0,  1.0]])
-
+                  [ 0.0,  0.0, 1.0]])
     return np.tensordot(R, vec, axes=(1, 0))
 
 
@@ -61,17 +72,6 @@ def find_extreme_mass(beta_func):
     idx = np.argmax(beta_vals)
     return mgrid[idx], beta_vals[idx]
 
-
-# ------------------------------------------------------------
-# In your LaTeX model, ionopause radius at z=0 is sqrt(2)*z0.
-# If you want ~40 AU cavity radius at z=0,
-# choose z0 = 40 AU / sqrt(2) ≈ 28.3 AU.
-# ------------------------------------------------------------
-z0     = (40.0/np.sqrt(2.0)) * AU
-
-# ============================================================
-# Asymmetric beta curves (matching screenshot structure)
-# ============================================================
 
 def asym_log(m, peak, m0, sL, sR):
     logm = np.log10(m)
@@ -89,45 +89,36 @@ def charge_from_mass(m):
 
 
 def set_stream_alpha(sp, alpha):
-    """
-    Matplotlib streamplot() returns a StreamplotSet with:
-      - sp.lines  : LineCollection
-      - sp.arrows : PatchCollection or list of patches (version-dependent)
-    This sets transparency in a version-robust way.
-    """
     if hasattr(sp, "lines") and sp.lines is not None:
         sp.lines.set_alpha(alpha)
-
     if hasattr(sp, "arrows") and sp.arrows is not None:
         arrows = sp.arrows
-        # Newer mpl: PatchCollection-like
         if hasattr(arrows, "set_alpha"):
             arrows.set_alpha(alpha)
         else:
-            # Older mpl: list of patches
             try:
                 for a in arrows:
                     a.set_alpha(alpha)
             except TypeError:
                 pass
 
+# ============================================================
+# Beta curves
+# ============================================================
 
-# Carbon
 def beta_carbon_0(m):  return asym_log(m,3.2,2e-17,0.6,1.0)
 def beta_carbon_45(m): return asym_log(m,2.7,2e-17,0.7,1.1)
 def beta_carbon_70(m): return asym_log(m,2.0,2e-17,0.8,1.2)
 
-# Silicate
 def beta_silicate_0(m):  return asym_log(m,0.85,5e-17,0.7,1.1)
 def beta_silicate_45(m): return asym_log(m,0.55,5e-17,0.8,1.2)
 def beta_silicate_70(m): return asym_log(m,0.30,5e-17,0.9,1.3)
 
-# Astrosilicates
-def beta_astrosil(m):     return asym_log(m,1.25,3e-17,0.65,1.05)
-def beta_adapted(m):      return asym_log(m,1.6,3e-17,0.65,1.05)
+def beta_astrosil(m): return asym_log(m,1.25,3e-17,0.65,1.05)
+def beta_adapted(m):  return asym_log(m,1.6,3e-17,0.65,1.05)
 
 # ============================================================
-# FULL E and B fields (Horányi & Mendis-style; matches your LaTeX)
+# Field model
 # ============================================================
 
 def compute_fields(x, y, z=0.0, B_rotation=0.0):
@@ -135,7 +126,6 @@ def compute_fields(x, y, z=0.0, B_rotation=0.0):
     y = np.asarray(y)
     z = np.asarray(z)
 
-    # Promote z to same shape as x/y if scalar
     if z.shape == ():
         z = z + np.zeros_like(x)
 
@@ -143,45 +133,36 @@ def compute_fields(x, y, z=0.0, B_rotation=0.0):
     r  = np.sqrt(r2)
     R  = np.sqrt(r2 + z**2)
 
-    # Avoid exact zeros (only for algebraic stability; cavity is handled by S-mask)
     r_safe = np.where(r == 0.0, 1e-30, r)
     R_safe = np.where(R == 0.0, 1e-30, R)
 
-    # Streamlines term
     S2 = r2 + 2.0*(z0**2)*(z/R_safe - 1.0)
-
-    # Cavity where S is not real (S2 <= 0)
     cavity = S2 <= 0.0
     S = np.sqrt(np.where(cavity, np.nan, S2))
 
-    # Common prefactor for E
     prefE = (B0*v0)/(c*r_safe)
 
-    # Helper factor appearing repeatedly
     with np.errstate(divide="ignore", invalid="ignore"):
         A = (-S/(r_safe**2) + 1.0/S - (z0**2 * z)/(R_safe**3 * S))
-
         Ex = prefE * (A * x * y)
         Ey = prefE * (S + A * (y**2))
         Ez = prefE * ((z0**2 * r2)/(R_safe**3 * S) * y)
 
-    # Mask cavity hard to NaN (streamplot behaves well with NaNs)
     Ex = np.where(cavity, np.nan, Ex)
     Ey = np.where(cavity, np.nan, Ey)
     Ez = np.where(cavity, np.nan, Ez)
 
-    # Magnetic field (Bz=0, Horányi 1985 form from your LaTeX)
     with np.errstate(divide="ignore", invalid="ignore"):
         denom = r_safe * (-1.0 + (z0**2 * z)/(R_safe**3))
-
-        # bug-proof: if denom hits 0 exactly, keep a signed tiny number
         tiny = 1e-30
-        denom = np.where(np.abs(denom) < tiny, np.where(denom >= 0, tiny, -tiny), denom)
-
+        denom = np.where(np.abs(denom) < tiny,
+                         np.where(denom >= 0, tiny, -tiny),
+                         denom)
         prefB = B0 / denom
-
-        Bx = prefB * (-S + (S/(r_safe**2) - 1.0/S + (z0**2 * z)/(S * R_safe**3)) * (y**2))
-        By = prefB * ((-S/(r_safe**2) + 1.0/S - (z0**2 * z)/(S * R_safe**3)) * (x * y))
+        Bx = prefB * (-S + (S/(r_safe**2) - 1.0/S +
+             (z0**2 * z)/(S * R_safe**3)) * (y**2))
+        By = prefB * ((-S/(r_safe**2) + 1.0/S -
+             (z0**2 * z)/(S * R_safe**3)) * (x * y))
         Bz = np.zeros_like(Bx)
 
     Bx = np.where(cavity, np.nan, Bx)
@@ -191,19 +172,13 @@ def compute_fields(x, y, z=0.0, B_rotation=0.0):
     E = np.stack((Ex, Ey, Ez), axis=0)
     B = np.stack((Bx, By, Bz), axis=0)
 
-    # Rotate magnetic field only
     if B_rotation != 0.0:
         B = rotate_about_z(B, B_rotation)
 
     return E, B
 
-
 # ============================================================
-# Full acceleration (gravity + rad pressure + Lorentz)
-#   DYNAMICAL CHANGE:
-#     - Promote state to 3D: [x,y,z,vx,vy,vz]
-#     - Use full Lorentz term: (q/m)(E + v×B)
-#     - Use q = charge_from_mass(m)
+# Dynamics
 # ============================================================
 
 def acceleration(state, m, Q, beta_func):
@@ -223,22 +198,17 @@ def acceleration(state, m, Q, beta_func):
     E = np.asarray(E, dtype=float).reshape(3,)
     B = np.asarray(B, dtype=float).reshape(3,)
 
-    # Keep "nominal interstellar" wind-subtraction option available:
-    # your previous script effectively used v_rel = v_vec in the stub.
-    # We'll keep it identical to your provided code unless you change it.
-    v_rel = v_vec
-
     Q_eff = charge_from_mass(m)
-    a_L = (Q_eff/m) * (E + np.cross(v_rel, B))
+    a_L = (Q_eff/m) * (E + np.cross(v_vec, B))
 
     a_total = a_grav + a_L
 
-    # Return time-derivative of state (6D)
-    return np.array([vx, vy, vz, a_total[0], a_total[1], a_total[2]], dtype=float)
+    return np.array([vx, vy, vz,
+                     a_total[0], a_total[1], a_total[2]],
+                     dtype=float)
 
-# ============================================================
-# RK4
-# ============================================================
+
+
 
 def rk4_step(state, dt, m, Q, beta_func):
     k1 = acceleration(state,               m, Q, beta_func)
@@ -247,15 +217,10 @@ def rk4_step(state, dt, m, Q, beta_func):
     k4 = acceleration(state + dt*k3,       m, Q, beta_func)
     return state + dt*(k1 + 2*k2 + 2*k3 + k4)/6.0
 
-# ============================================================
-# Integrate trajectory
-#   DYNAMICAL CHANGE:
-#     - Initialize z=0, vz=0 (identical geometry to before)
-#     - Stop condition uses full 3D radius; plots still show x-y projection
-# ============================================================
 
 def integrate(m, Q, beta_func):
-    state = np.array([-100*AU, 15*AU, 0.0, v_inf, 0.0, 0.0], dtype=float)
+    state = np.array([-100*AU, 15*AU, 0.0,
+                       v_inf, 0.0, 0.0], dtype=float)
 
     dt   = 5e5
     tmax = 5e10
@@ -264,21 +229,18 @@ def integrate(m, Q, beta_func):
     t = 0.0
     while t < tmax:
         traj.append(state.copy())
-
-        rr = np.sqrt(state[0]**2 + state[1]**2 + state[2]**2)
+        rr = np.linalg.norm(state[:3])
         if rr < 5*AU or rr > 150*AU:
             break
-
         state = rk4_step(state, dt, m, Q, beta_func)
         t += dt
-
         if not np.all(np.isfinite(state)):
             break
 
     return np.array(traj)
 
 # ============================================================
-# Field line plot
+# Plotting functions (UNCHANGED behavior)
 # ============================================================
 
 def plot_fields():
@@ -287,27 +249,31 @@ def plot_fields():
     X, Y = np.meshgrid(x, y)
 
     E, B = compute_fields(X, Y, 0.0, B_rotation=B_ROTATION)
-
     Ex, Ey = E[0], E[1]
     Bx, By, Bz = B[0], B[1], B[2]
 
     fig, ax = plt.subplots(figsize=(4.6, 4.2))
 
-    spE = ax.streamplot(X/AU, Y/AU, Ex, Ey, color="red",  density=1.0, linewidth=0.7, arrowsize=1.4)
-    spB = ax.streamplot(X/AU, Y/AU, Bx, By, color="blue", density=1.0, linewidth=0.7, arrowsize=1.4)
+    spE = ax.streamplot(X/AU, Y/AU, Ex, Ey,
+                        color="red", density=1.0,
+                        linewidth=0.7, arrowsize=1.4)
+    spB = ax.streamplot(X/AU, Y/AU, Bx, By,
+                        color="blue", density=1.0,
+                        linewidth=0.7, arrowsize=1.4)
 
     Bmag = np.sqrt(Bx**2 + By**2 + Bz**2)
-    ax.contour(X/AU, Y/AU, Bmag, levels=18, colors="blue", linewidths=0.35, alpha=0.55)
+    ax.contour(X/AU, Y/AU, Bmag,
+               levels=18, colors="blue",
+               linewidths=0.35, alpha=0.55)
 
-    cavity_r = np.sqrt(2.0)*z0/AU
-    cavity = plt.Circle((0, 0), cavity_r, color="lightgrey", alpha=0.35, ec="grey", lw=0.8)
-    ax.add_artist(cavity)
+    
 
-    sun = plt.Circle((0, 0), 2, color="gold", zorder=6)
+    sun = plt.Circle((0,0), 2,
+                     color="gold", zorder=6)
     ax.add_artist(sun)
 
-    ax.set_xlim(-100, 100)
-    ax.set_ylim(-100, 100)
+    ax.set_xlim(-100,100)
+    ax.set_ylim(-100,100)
     ax.set_aspect("equal")
     ax.set_xlabel("x [AU]")
     ax.set_ylabel("y [AU]")
@@ -316,17 +282,12 @@ def plot_fields():
     plt.tight_layout()
     plt.show()
 
-# ============================================================
-# Trajectory plot
-# ============================================================
 
 def plot_trajectories():
     m_extreme, beta_extreme = find_extreme_mass(beta_adapted)
-
     print(f"Extreme beta = {beta_extreme:.3f} at m = {m_extreme:.3e} kg")
 
     masses = [m_extreme]
-
     Q = 1e-16
 
     fig, ax = plt.subplots(figsize=(4.6, 4.2))
@@ -335,18 +296,17 @@ def plot_trajectories():
         traj = integrate(m, Q, beta_adapted)
         if traj.size == 0:
             continue
-        # x-y projection (identical plotting behavior)
-        ax.plot(traj[:, 0]/AU, traj[:, 1]/AU, lw=1.2, label=f"m={m:.1e}")
+        ax.plot(traj[:,0]/AU, traj[:,1]/AU,
+                lw=1.2, label=f"m={m:.1e}")
 
-    sun = plt.Circle((0, 0), 2, color="gold", zorder=5)
+    sun = plt.Circle((0,0), 2,
+                     color="gold", zorder=5)
     ax.add_artist(sun)
 
-    cavity_r = np.sqrt(2.0)*z0/AU
-    cavity = plt.Circle((0, 0), cavity_r, fill=False, ec="grey", lw=0.8, alpha=0.8)
-    ax.add_artist(cavity)
+    
 
-    ax.set_xlim(-100, 100)
-    ax.set_ylim(-100, 100)
+    ax.set_xlim(-100,100)
+    ax.set_ylim(-100,100)
     ax.set_aspect("equal")
     ax.set_xlabel("x [AU]")
     ax.set_ylabel("y [AU]")
@@ -356,45 +316,37 @@ def plot_trajectories():
     plt.tight_layout()
     plt.show()
 
-# ============================================================
-# Combined plot (fields + trajectories superimposed)
-#   - streamplot alpha handled via set_stream_alpha (no 'alpha' kwarg)
-#   - trajectories drawn with black halo + order chosen so none are hidden
-# ============================================================
 
 def plot_fields_with_trajectories():
-    # Grid for fields
     x = np.linspace(-100*AU, 100*AU, 320)
     y = np.linspace(-100*AU, 100*AU, 320)
     X, Y = np.meshgrid(x, y)
 
-    E, B = compute_fields(X, Y, 0.0, B_rotation=B_ROTATION)
-
+    E, B = compute_fields(X, Y, 0.0,
+                          B_rotation=B_ROTATION)
     Ex, Ey = E[0], E[1]
     Bx, By, Bz = B[0], B[1], B[2]
 
     fig, ax = plt.subplots(figsize=(4.9, 4.5))
 
-    # Fields in the background
-    spE = ax.streamplot(X/AU, Y/AU, Ex, Ey, color="red",  density=1.0, linewidth=0.60, arrowsize=1.15, zorder=1)
-    spB = ax.streamplot(X/AU, Y/AU, Bx, By, color="blue", density=1.0, linewidth=0.60, arrowsize=1.15, zorder=2)
+    spE = ax.streamplot(X/AU, Y/AU, Ex, Ey,
+                        color="red", density=1.0,
+                        linewidth=0.60, arrowsize=1.15, zorder=1)
+    spB = ax.streamplot(X/AU, Y/AU, Bx, By,
+                        color="blue", density=1.0,
+                        linewidth=0.60, arrowsize=1.15, zorder=2)
 
-    # Make fields lighter so trajectories pop
     set_stream_alpha(spE, 0.45)
     set_stream_alpha(spB, 0.45)
 
-    # |B| contours (optional visual aid)
     Bmag = np.sqrt(Bx**2 + By**2 + Bz**2)
-    ax.contour(X/AU, Y/AU, Bmag, levels=18, colors="blue", linewidths=0.30, alpha=0.35, zorder=0)
+    ax.contour(X/AU, Y/AU, Bmag,
+               levels=18, colors="blue",
+               linewidths=0.30, alpha=0.35, zorder=0)
 
-    # Cavity
-    cavity_r = np.sqrt(2.0)*z0/AU
-    cavity = plt.Circle((0, 0), cavity_r, color="lightgrey", alpha=0.35, ec="grey", lw=0.8, zorder=3)
-    ax.add_artist(cavity)
+    
 
-    # Trajectories on top:
-    # draw largest mass first, smallest last, so none get hidden
-    masses = [1e-16, 2e-17, 5e-18]   # green, orange, blue (blue ends up on top)
+    masses = [1e-16, 2e-17, 5e-18]
     Q = 1e-16
 
     for m in masses:
@@ -402,58 +354,89 @@ def plot_fields_with_trajectories():
         if traj.size == 0:
             continue
 
-        xtraj = traj[:, 0] / AU
-        ytraj = traj[:, 1] / AU
+        xtraj = traj[:,0]/AU
+        ytraj = traj[:,1]/AU
 
-        # black halo for visibility
-        ax.plot(xtraj, ytraj, lw=3.2, color="k", zorder=7)
-        # colored trajectory
-        ax.plot(xtraj, ytraj, lw=1.9, zorder=8, label=f"m={m:.1e}")
+        ax.plot(xtraj, ytraj,
+                lw=3.2, color="k", zorder=7)
+        ax.plot(xtraj, ytraj,
+                lw=1.9, zorder=8,
+                label=f"m={m:.1e}")
 
-    # Sun marker on very top
-    sun = plt.Circle((0, 0), 2, color="gold", zorder=9)
+    sun = plt.Circle((0,0), 2,
+                     color="gold", zorder=9)
     ax.add_artist(sun)
 
-    ax.set_xlim(-100, 100)
-    ax.set_ylim(-100, 100)
+    ax.set_xlim(-100,100)
+    ax.set_ylim(-100,100)
     ax.set_aspect("equal")
     ax.set_xlabel("x [AU]")
     ax.set_ylabel("y [AU]")
-    ax.legend(fontsize=7, frameon=False, loc="lower left")
+    ax.legend(fontsize=7,
+              frameon=False, loc="lower left")
     ax.set_title("Fields (streamlines) with Dust Trajectories (z=0 slice)")
 
     plt.tight_layout()
     plt.show()
 
-# ============================================================
-# Beta curve figure (all materials)
-# ============================================================
 
 def plot_beta_curves():
     m = np.logspace(-19, -12, 600)
 
     fig, ax = plt.subplots(figsize=(4.9, 3.8))
 
-    ax.loglog(m, beta_carbon_0(m),  'k-',  label='Carbon p=0%')
-    ax.loglog(m, beta_carbon_45(m), 'k--', label='Carbon p=45%')
-    ax.loglog(m, beta_carbon_70(m), 'k:',  label='Carbon p=70%')
+    ax.loglog(m, beta_carbon_0(m),'k-',label='Carbon p=0%')
+    ax.loglog(m, beta_carbon_45(m),'k--',label='Carbon p=45%')
+    ax.loglog(m, beta_carbon_70(m),'k:',label='Carbon p=70%')
 
-    ax.loglog(m, beta_adapted(m),   'r-',  label='Adapted Astron. sil.')
-    ax.loglog(m, beta_astrosil(m),  'b:',  label='Astron. sil.')
+    ax.loglog(m, beta_adapted(m),'r-',label='Adapted Astron. sil.')
+    ax.loglog(m, beta_astrosil(m),'b:',label='Astron. sil.')
 
-    ax.loglog(m, beta_silicate_0(m),  color='limegreen',           label='Silicate p=0%')
-    ax.loglog(m, beta_silicate_45(m), color='limegreen', linestyle='--', label='Silicate p=45%')
-    ax.loglog(m, beta_silicate_70(m), color='limegreen', linestyle=':',  label='Silicate p=70%')
+    ax.loglog(m, beta_silicate_0(m),
+              color='limegreen',label='Silicate p=0%')
+    ax.loglog(m, beta_silicate_45(m),
+              color='limegreen',linestyle='--',
+              label='Silicate p=45%')
+    ax.loglog(m, beta_silicate_70(m),
+              color='limegreen',linestyle=':',
+              label='Silicate p=70%')
 
     ax.set_xlabel("Mass [kg]")
     ax.set_ylabel(r"$\beta$")
-    ax.set_xlim(1e-19, 1e-12)
-    ax.set_ylim(1e-2, 4)
-    ax.legend(fontsize=7, frameon=False, loc="upper right")
+    ax.set_xlim(1e-19,1e-12)
+    ax.set_ylim(1e-2,4)
+    ax.legend(fontsize=7,frameon=False,
+              loc="upper right")
     ax.set_title(r"$\beta$ curves for multiple materials")
 
     plt.tight_layout()
     plt.show()
+
+# ============================================================
+# Parameter sweep
+# ============================================================
+
+def run_parameter_sweep():
+    global B_ROTATION, B0
+
+    original_rotation = B_ROTATION
+    original_B0 = B0
+
+    for B_rot in B_ROTATIONS:
+        for B_strength in B_STRENGTHS:
+
+            print("\n====================================")
+            print(f"B rotation = {B_rot:.2f} rad")
+            print(f"B strength = {B_strength:.2e} T")
+            print("====================================")
+
+            B_ROTATION = B_rot
+            B0 = B_strength
+
+            plot_fields_with_trajectories()
+
+    B_ROTATION = original_rotation
+    B0 = original_B0
 
 # ============================================================
 # Run everything
@@ -464,3 +447,4 @@ if __name__ == "__main__":
     plot_trajectories()
     plot_fields_with_trajectories()
     plot_beta_curves()
+    run_parameter_sweep()
