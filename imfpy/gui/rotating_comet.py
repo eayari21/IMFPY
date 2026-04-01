@@ -34,6 +34,11 @@ w_vec  = np.array([400e3, 0.0, 0.0])
 B0     = 3.5e-9
 v0     = 400e3
 
+E0x = 0.0
+E0y = 1.0   # or -1.0 if you want downward
+B0x = 1.0
+B0y = 0.0
+
 # ============================================================
 # Magnetic field rotation angle (radians)
 # ============================================================
@@ -137,10 +142,39 @@ def compute_fields(x, y, z=0.0, B_rotation=0.0):
     r_safe = np.where(r == 0.0, 1e-30, r)
     R_safe = np.where(R == 0.0, 1e-30, R)
 
+    r = np.sqrt(r2)
+    r_safe = np.where(r == 0.0, 1e-30, r)
+
     # Use x as heliospheric axis so the z=0 slice shows the paraboloid
-    S2 = r2 + 2.0*(z0**2)*(x/R_safe - 1.0)
+    # Shift so nose is near origin (tune if needed)
+    # Move the nose left of the Sun
+    # Nose location
+    x_nose = -60 * AU
+
+    # Shift coordinates so the cavity nose sits at x_nose
+    x_ax = x - x_nose
+
+    # Cylindrical radius about the x-axis
+    r2 = y**2 + z**2
+    R  = np.sqrt(x_ax**2 + r2)
+    R_safe = np.where(R == 0.0, 1e-30, R)
+
+    # Rounded comet-like cavity opening to +x
+    z0_eff = 0.75 * z0
+    S2 = r2 + 2.0 * z0_eff**2 * (-x_ax / R_safe - 1.0)
+
     cavity = S2 <= 0.0
     S = np.sqrt(np.where(cavity, np.nan, S2))
+
+    # Distance-like coordinate outside the cavity
+    S_pos = np.sqrt(np.maximum(S2, 0.0))
+
+    # Relaxation length: larger = fields stay distorted farther away
+    L_relax = 35.0 * AU
+
+    # f = 1 near boundary, f -> 0 far away
+    f = np.exp(-(S_pos / L_relax)**2)
+    f = np.where(cavity, np.nan, f)
 
     prefE = (B0*v0)/(c*r_safe)
 
@@ -171,8 +205,28 @@ def compute_fields(x, y, z=0.0, B_rotation=0.0):
     By = np.where(cavity, np.nan, By)
     Bz = np.where(cavity, np.nan, Bz)
 
+    # Normalize distorted fields before blending
+    Emag = np.sqrt(Ex**2 + Ey**2)
+    Bmag = np.sqrt(Bx**2 + By**2)
+
+    Emag_safe = np.where((~np.isfinite(Emag)) | (Emag == 0.0), 1.0, Emag)
+    Bmag_safe = np.where((~np.isfinite(Bmag)) | (Bmag == 0.0), 1.0, Bmag)
+
+    Ex_d = Ex / Emag_safe
+    Ey_d = Ey / Emag_safe
+    Bx_d = Bx / Bmag_safe
+    By_d = By / Bmag_safe
+
+    # Blend distorted fields near cavity with uniform far-field components
+    Ex = f * Ex_d + (1.0 - f) * E0x
+    Ey = f * Ey_d + (1.0 - f) * E0y
+
+    Bx = f * Bx_d + (1.0 - f) * B0x
+    By = f * By_d + (1.0 - f) * B0y
+
     E = np.stack((Ex, Ey, Ez), axis=0)
     B = np.stack((Bx, By, Bz), axis=0)
+
 
     if B_rotation != 0.0:
         B = rotate_about_z(B, B_rotation)
@@ -259,14 +313,33 @@ def plot_fields():
     spE = ax.streamplot(X/AU, Y/AU, Ex, Ey,
                         color="red", density=1.0,
                         linewidth=0.7, arrowsize=1.4)
-    spB = ax.streamplot(X/AU, Y/AU, Bx, By,
-                        color="blue", density=1.0,
-                        linewidth=0.7, arrowsize=1.4)
+    
+        # --- cavity boundary (same geometry as in compute_fields) ---
+    z0_eff = 0.75 * z0
+
+    # Must match the coordinate shifts used in compute_fields
+    Xs = X - 40*AU
+    x_nose = -60 * AU
+    Xax = Xs - x_nose
+
+    # z = 0 slice, so cylindrical radius about x-axis is just |y|
+    r2_cav = Y**2
+    R_cav = np.sqrt(Xax**2 + r2_cav)
+    R_cav = np.where(R_cav == 0.0, 1e-30, R_cav)
+
+    S2_cav = r2_cav + 2.0 * z0_eff**2 * (-Xax / R_cav - 1.0)
+
+    ax.contour(X/AU, Y/AU, S2_cav,
+               levels=[0.0], colors="black",
+               linewidths=1.6, zorder=5)
+    # spB = ax.streamplot(X/AU, Y/AU, Bx, By,
+                        # color="blue", density=1.0,
+                        # linewidth=0.7, arrowsize=1.4)
 
     Bmag = np.sqrt(Bx**2 + By**2 + Bz**2)
-    ax.contour(X/AU, Y/AU, Bmag,
-               levels=18, colors="blue",
-               linewidths=0.35, alpha=0.55)
+    # ax.contour(X/AU, Y/AU, Bmag,
+    #            levels=18, colors="blue",
+    #            linewidths=0.35, alpha=0.55)
 
     
 
@@ -277,9 +350,9 @@ def plot_fields():
     ax.set_xlim(-100,100)
     ax.set_ylim(-100,100)
     ax.set_aspect("equal")
-    ax.set_xlabel("x [AU]")
+    ax.set_xlabel("z [AU]")
     ax.set_ylabel("y [AU]")
-    ax.set_title("Electric (red) & Magnetic (blue) Fields (z=0 slice)")
+    # ax.set_title("Electric (red) & Magnetic (blue) Fields (z=0 slice)")
 
     plt.tight_layout()
     plt.show()
