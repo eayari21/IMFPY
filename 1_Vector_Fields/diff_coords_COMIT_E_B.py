@@ -84,7 +84,7 @@ class Params:
     yz_z_lim: float = 200.0
 
     # Nose view: x-z plane at y = 0
-    xz_lim: float = 200.0
+    xz_lim: float = 100.0
 
     n_edge_seeds_side: int = 12
     n_edge_seeds_nose: int = 7
@@ -253,44 +253,80 @@ def projected_field_side_yz(y, z, which="E", p: Params = P):
 
 def projected_field_nose_xz(x, z, which="E", p: Params = P):
     """
-    Nose view: x-z plane at y = 0
-    Horizontal axis = x
-    Vertical axis   = z
+    Nose view drawn on a circular cross-section.
 
-    Force the field lines to wrap around the drawn circular cavity.
+    For the ELECTRIC field only, use the exact COMIT electric field
+    from Eq. (13)/(15), evaluated in the planar z_model = 0 slice.
+    We identify the plotting coordinates (x, z) with the model-plane
+    coordinates (x_model, y_model), because that is the slice where
+    the in-plane electric field bends toward and into the obstacle
+    as in the attached reference figure.
+
+    This keeps the existing circular cavity geometry and leaves the
+    magnetic-field construction unchanged.
     """
     a = p.nose_radius
     r2 = x*x + z*z
     r = np.sqrt(max(r2, p.eps))
 
-    # Inside cavity should never be traced, but guard anyway
     if r <= a:
         return np.array([np.nan, np.nan], dtype=float)
 
     if which == "E":
-        # Uniform downward background field
-        Ux, Uz = 0.0, 1.0
+        # Use the exact analytic electric field in the model z=0 plane.
+        # Here:
+        #   x_plot -> x_model
+        #   z_plot -> y_model
+        #   z_model = 0
+        #
+        # The in-plane components are therefore (Ex, Ey).
+                # Rescale the coordinates sent into the analytic COMIT field so that
+        # the analytic exclusion circle (radius sqrt(2)*z0 in the z_model=0 plane)
+        # matches the actual plotted cavity radius a.
+        scale = (np.sqrt(2.0) * p.z0) / a
+
+        xm = scale * x
+        ym = scale * z
+        zm = 0.0
+
+        Ex, Ey, _Ez = electric_field_model(xm, ym, zm, p)
+        F = np.array([Ex, Ey], dtype=float)
+
+        if np.any(~np.isfinite(F)):
+            return np.array([np.nan, np.nan], dtype=float)
+
+        mag = np.hypot(F[0], F[1])
+        if (not np.isfinite(mag)) or mag < p.min_speed:
+            return np.array([np.nan, np.nan], dtype=float)
+
+        return F / mag
+
     elif which == "B":
-        # Uniform rightward background field
-        Ux, Uz = 1.0, 0.0
+        # Keep the magnetic field exactly as before.
+        theta = np.arctan2(z, x)
+
+        Ux, Uz = -1.0, 0.0
+
+        Ur = Ux * np.cos(theta) + Uz * np.sin(theta)
+        Ut = -Ux * np.sin(theta) + Uz * np.cos(theta)
+
+        ar2 = (a*a) / r2
+        Vr = Ur * (1.0 - ar2)
+        Vt = Ut * (1.0 + ar2)
+
+        Fx = Vr * np.cos(theta) - Vt * np.sin(theta)
+        Fz = Vr * np.sin(theta) + Vt * np.cos(theta)
+
+        return np.array([Fx, Fz], dtype=float)
+
     else:
         raise ValueError("which must be 'E' or 'B'")
 
-    theta = np.arctan2(z, x)
 
-    # Cylinder flow in polar coordinates
-    Ur = Ux * np.cos(theta) + Uz * np.sin(theta)
-    Ut = -Ux * np.sin(theta) + Uz * np.cos(theta)
+def add_sun_circle(ax):
+    sun = Circle((0.0, 0.0), 2.0, facecolor="gold", edgecolor="none", zorder=6)
+    ax.add_patch(sun)
 
-    ar2 = (a*a) / r2
-    Vr = Ur * (1.0 - ar2)
-    Vt = Ut * (1.0 + ar2)
-
-    # Convert back to Cartesian
-    Fx = Vr * np.cos(theta) - Vt * np.sin(theta)
-    Fz = Vr * np.sin(theta) + Vt * np.cos(theta)
-
-    return np.array([Fx, Fz], dtype=float)
 
 # =============================================================================
 # Field-line tracing
@@ -398,10 +434,8 @@ def make_nose_halo_seeds(radius, n):
 def make_nose_edge_seeds_E(xlim, zlim, n):
     """
     Uniform top/bottom seeds for the electric field.
-    Avoid the centerline where lines stack vertically.
     """
-    x = np.linspace(-0.75 * xlim, 0.75 * xlim, n)
-    x = x[np.abs(x) > 18.0]
+    x = np.linspace(-0.92 * xlim, 0.92 * xlim, n)
     top = np.column_stack([x, np.full_like(x,  zlim)])
     bot = np.column_stack([x, np.full_like(x, -zlim)])
     return np.vstack([top, bot])
@@ -409,11 +443,12 @@ def make_nose_edge_seeds_E(xlim, zlim, n):
 
 def make_nose_edge_seeds_B(xlim, zlim, n):
     """
-    Uniform left/right seeds for the magnetic field.
-    Avoid the midplane where lines pile up horizontally.
+    Uniform left/right seeds for the magnetic field,
+    but skip the centerline so no streamline goes straight through the cavity.
     """
-    z = np.linspace(-0.75 * zlim, 0.75 * zlim, n)
-    z = z[np.abs(z) > 18.0]
+    z = np.linspace(-0.92 * zlim, 0.92 * zlim, n)
+    z = z[np.abs(z) > 1e-9]   # remove the y=0 seed
+
     left  = np.column_stack([np.full_like(z, -xlim), z])
     right = np.column_stack([np.full_like(z,  xlim), z])
     return np.vstack([left, right])
@@ -494,7 +529,7 @@ def format_axes(ax, xlabel, ylabel, xlim, ylim, equal=False):
         ax.set_aspect("equal", adjustable="box")
 
 
-def add_arrow_to_line(ax, line, color, lw=1.0, arrow_size=9, frac=0.55):
+def add_arrow_to_line(ax, line, color, lw=1.0, arrow_size=9, frac=0.7):
     if len(line) < 8:
         return
 
@@ -635,10 +670,10 @@ def build_side_figure(p: Params):
 def build_nose_figure(p: Params):
     fig, ax = plt.subplots(figsize=(7.2, 7.0))
 
-    seeds_edge_E = make_nose_edge_seeds_E(p.xz_lim, p.xz_lim, 7)
-    seeds_edge_B = make_nose_edge_seeds_B(p.xz_lim, p.xz_lim, 7)
-    seeds_halo_E = make_nose_halo_seeds(p.nose_radius, 6)
-    seeds_halo_B = make_nose_halo_seeds(p.nose_radius, 6)
+    seeds_edge_E = make_nose_edge_seeds_E(p.xz_lim, p.xz_lim, 19)
+    seeds_edge_B = make_nose_edge_seeds_B(p.xz_lim, p.xz_lim, 21)
+    seeds_halo_E = make_nose_halo_seeds(p.nose_radius, 4)
+    seeds_halo_B = make_nose_halo_seeds(p.nose_radius, 4)
     E_lines = []
     B_lines = []
 
@@ -654,7 +689,7 @@ def build_nose_figure(p: Params):
             if len(line) > 10:
                 E_lines.append(line)
 
-    for seed in np.vstack([seeds_edge_B, seeds_halo_B]):
+    for seed in seeds_edge_B:
         if inside_nose_xz(seed[0], seed[1], p):
             line = trace_field_line(
                 seed,
@@ -670,6 +705,7 @@ def build_nose_figure(p: Params):
     plot_lines(ax, B_lines, color="blue", lw=1.05, alpha=0.88, zorder=3, arrow_size=p.arrow_size)
 
     add_heliopause_nose(ax, p.nose_radius)
+    add_sun_circle(ax)
 
     format_axes(
         ax,
